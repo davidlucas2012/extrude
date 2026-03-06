@@ -10,21 +10,35 @@ name = sys.argv[2] if len(sys.argv) > 2 else "David"
 initial = name[0].upper()
 font_path = "/Users/davidlucas/Downloads/Calistoga_Merriweather/Calistoga/Calistoga-Regular.ttf"
 
-LETTER_SIZE = 60
+LETTER_SIZE   = 60    # reference font size — auto-corrected below to hit TARGET_DIM
+TARGET_DIM    = 55.0  # the larger of (width, height) will equal this
 LETTER_DEPTH = 5.0   # big letter extrusion height (units)
 NAME_DEPTH   = 6.0   # name extrusion height — 1 unit taller than letter
 RING_DEPTH   = 3.0   # keyring ring extrusion height
 
 # ─── BIG LETTER ──────────────────────────────────────────────────────────────
+# Create at reference size, measure, then rescale so max(w, h) == TARGET_DIM.
 big_letter_draft = Draft.makeShapeString(
     String=initial, FontFile=font_path, Size=LETTER_SIZE, Tracking=0
 )
 doc.recompute()
-
 big_obj = doc.getObject(big_letter_draft.Name)
-big_bb = big_obj.Shape.BoundBox
+ref_bb  = big_obj.Shape.BoundBox
+max_dim = max(ref_bb.XMax - ref_bb.XMin, ref_bb.YMax - ref_bb.YMin)
+letter_size = LETTER_SIZE * (TARGET_DIM / max_dim)
+
+if abs(letter_size - LETTER_SIZE) > 0.01:
+    doc.removeObject(big_letter_draft.Name)
+    big_letter_draft = Draft.makeShapeString(
+        String=initial, FontFile=font_path, Size=letter_size, Tracking=0
+    )
+    doc.recompute()
+    big_obj = doc.getObject(big_letter_draft.Name)
+
+big_bb   = big_obj.Shape.BoundBox
 letter_w = big_bb.XMax - big_bb.XMin
 letter_h = big_bb.YMax - big_bb.YMin
+print(f"Letter size: {letter_size:.2f}, dims: {letter_w:.1f} × {letter_h:.1f}")
 
 big_extrude = doc.addObject("Part::Extrusion", "BigLetterExtrude")
 big_extrude.Base = big_obj
@@ -81,17 +95,31 @@ else:
     print(f"Main stroke: x={stroke_x_min:.1f}–{stroke_x_max:.1f}, width={stroke_width:.1f}")
 
 # ─── NAME TEXT ───────────────────────────────────────────────────────────────
-# Size the name so it fills ~70 % of the stroke width (leaves visual padding).
-# When rotated 90°, the font-size becomes the horizontal extent of each glyph.
-name_size = stroke_width * 0.70
-name_size = max(4.0, min(name_size, 14.0))  # clamp to reasonable range
+# Rule 1: cap-height capped at 7 units (first letter height ≤ 7).
+# Rule 2: full name length (X extent before rotation = height after 90° rotation)
+#         must fit within 85% of the letter's height — scale down if not.
+name_size = max(4.0, min(stroke_width * 0.70, 7.0))
 
+# Create at initial size to measure actual rendered text length
 name_draft = Draft.makeShapeString(
     String=name, FontFile=font_path, Size=name_size, Tracking=0
 )
 doc.recompute()
-
 name_obj = doc.getObject(name_draft.Name)
+
+text_length = name_obj.Shape.BoundBox.XMax - name_obj.Shape.BoundBox.XMin
+max_name_height = letter_h * 0.85   # max vertical extent once rotated
+
+if text_length > max_name_height:
+    name_size = max(4.0, name_size * (max_name_height / text_length))
+    doc.removeObject(name_draft.Name)
+    name_draft = Draft.makeShapeString(
+        String=name, FontFile=font_path, Size=name_size, Tracking=0
+    )
+    doc.recompute()
+    name_obj = doc.getObject(name_draft.Name)
+
+print(f"Name size: {name_size:.2f} units")
 # Rotate 90° CCW so the name runs bottom-to-top inside the letter
 name_obj.Placement.Rotation = App.Rotation(App.Vector(0, 0, 1), 90)
 doc.recompute()
