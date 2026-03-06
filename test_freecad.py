@@ -172,15 +172,17 @@ keyring_feat.Shape = keyring_shape
 doc.recompute()
 
 # ─── EXPORT ──────────────────────────────────────────────────────────────────
-# Two separate STLs for dual-color printing in Bambu Studio:
-#   *_letter.stl  → body filament (e.g. orange)
-#   *_text.stl    → name filament (e.g. blue)
-letter_stl = f"/Users/davidlucas/Desktop/{name}_letter.stl"
-text_stl   = f"/Users/davidlucas/Desktop/{name}_text.stl"
+combined_shape = (
+    doc.getObject("BigLetterExtrude").Shape
+    .fuse(doc.getObject("NameExtrude").Shape)
+    .fuse(doc.getObject("KeyringLoop").Shape)
+)
+combined_feat = doc.addObject("Part::Feature", "KeychainCombined")
+combined_feat.Shape = combined_shape
+doc.recompute()
 
-Mesh.export([doc.getObject("BigLetterExtrude"), doc.getObject("KeyringLoop")], letter_stl)
-Mesh.export([doc.getObject("NameExtrude")], text_stl)
+output_stl = f"/Users/davidlucas/Desktop/{name}_keychain.stl"
+Mesh.export([combined_feat], output_stl)
 
-print(f"Exported letter body : {letter_stl}")
-print(f"Exported name text   : {text_stl}")
+print(f"Exported combined keychain: {output_stl}")
 print("Done!")
