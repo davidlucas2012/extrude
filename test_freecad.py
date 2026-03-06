@@ -13,13 +13,19 @@ doc = App.newDocument("KeychainDoc")
 
 name      = sys.argv[2] if len(sys.argv) > 2 else "David"
 initial   = name[0].upper()
+isEngrave = sys.argv[3].lower() == "engrave" if len(sys.argv) > 3 else True
 font_path = "/Users/davidlucas/Downloads/Calistoga_Merriweather/Calistoga/Calistoga-Regular.ttf"
 
-LETTER_SIZE  = 60     # reference font size — rescaled below to hit TARGET_DIM
-TARGET_DIM   = 55.0   # the larger of (width, height) will equal this
-LETTER_DEPTH = 5.0    # big letter extrusion height
-NAME_DEPTH   = 6.0    # name extrusion height (1 unit taller than letter)
-RING_DEPTH   = 3.0    # keyring ring extrusion height
+
+
+LETTER_SIZE   = 60    # reference font size — rescaled below to hit TARGET_DIM
+TARGET_DIM    = 55.0  # the larger of (width, height) will equal this
+LETTER_DEPTH  = 5.0   # big letter extrusion height
+EMBOSS_DEPTH  = 6.0   # name extrusion height when embossed (1 unit taller than letter)
+ENGRAVE_DEPTH = 1.0   # how deep the name is cut into the letter top surface when engraved
+RING_DEPTH    = 3.0   # keyring ring extrusion height
+
+NAME_MODE = "engrave" if isEngrave else "emboss"  # "engrave" | "emboss"
 
 
 def make_text_shape(text, font_file, size):
@@ -146,8 +152,12 @@ name_bb = name_2d_rotated.BoundBox
 name_x = stroke_cx - (name_bb.XMin + name_bb.XMax) / 2
 name_y = (big_bb.YMin + big_bb.YMax) / 2 - (name_bb.YMin + name_bb.YMax) / 2
 
-name_2d_placed     = place_shape(name_2d, rotation_deg=name_rotation, x=name_x, y=name_y)
-name_extrude_shape = name_2d_placed.extrude(App.Vector(0, 0, NAME_DEPTH))
+if NAME_MODE == "engrave":
+    name_2d_placed = place_shape(name_2d, rotation_deg=name_rotation, x=name_x, y=name_y, z=LETTER_DEPTH)
+    name_tool_shape = name_2d_placed.extrude(App.Vector(0, 0, -ENGRAVE_DEPTH))
+else:  # emboss
+    name_2d_placed = place_shape(name_2d, rotation_deg=name_rotation, x=name_x, y=name_y)
+    name_tool_shape = name_2d_placed.extrude(App.Vector(0, 0, EMBOSS_DEPTH))
 
 # ─── KEYRING LOOP ─────────────────────────────────────────────────────────────
 outer_r = 4.0
@@ -168,7 +178,10 @@ hole          = Part.makeCylinder(inner_r, RING_DEPTH, App.Vector(keyring_x, key
 keyring_shape = outer_disk.cut(hole)
 
 # ─── COMBINE & EXPORT ─────────────────────────────────────────────────────────
-combined_shape = big_extrude_shape.fuse(name_extrude_shape).fuse(keyring_shape)
+if NAME_MODE == "engrave":
+    combined_shape = big_extrude_shape.cut(name_tool_shape).fuse(keyring_shape)
+else:  # emboss
+    combined_shape = big_extrude_shape.fuse(name_tool_shape).fuse(keyring_shape)
 combined_feat  = doc.addObject("Part::Feature", "KeychainCombined")
 combined_feat.Shape = combined_shape
 doc.recompute()
