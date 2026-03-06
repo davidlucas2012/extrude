@@ -120,10 +120,68 @@ else:
     stroke_cx     = (stroke_x_min + stroke_x_max) / 2
     print(f"Main stroke: x={stroke_x_min:.1f}-{stroke_x_max:.1f}, width={stroke_width:.1f}")
 
+# ─── FIND USABLE HEIGHT AT MAIN STROKE ────────────────────────────────────────
+# The letter bbox ≠ actual solid. For curved letters (C, G, O) the stroke is
+# only solid for a portion of the bbox height. Probe at stroke_cx to find it.
+N_Y_STRIPS  = 40
+strip_h_val = letter_h / N_Y_STRIPS
+# Use a narrow fixed probe at stroke_cx — this detects whether the arc's leftmost
+# edge is actually solid at each Y level. A wide probe (e.g. stroke_width * 0.80)
+# catches thick serifs at the C tips and falsely extends usable_h.
+probe_w     = 2.0
+
+y_vols = []
+for i in range(N_Y_STRIPS):
+    y0   = big_bb.YMin + i * strip_h_val + strip_h_val * 0.05
+    ybox = Part.makeBox(
+        probe_w, strip_h_val * 0.90, LETTER_DEPTH,
+        App.Vector(stroke_cx - probe_w / 2, y0, 0)
+    )
+    try:
+        y_vols.append(big_extrude_shape.common(ybox).Volume)
+    except Exception:
+        y_vols.append(0.0)
+
+y_peak = max(y_vols) if y_vols else 0
+if y_peak > 0:
+    y_thresh        = y_peak * 0.40
+    filled          = [i for i, v in enumerate(y_vols) if v >= y_thresh]
+    usable_y_min    = big_bb.YMin + min(filled) * strip_h_val
+    usable_y_max    = big_bb.YMin + (max(filled) + 1) * strip_h_val
+    usable_h        = usable_y_max - usable_y_min
+    usable_y_center = (usable_y_min + usable_y_max) / 2
+else:
+    usable_y_min    = big_bb.YMin
+    usable_y_max    = big_bb.YMax
+    usable_h        = letter_h
+    usable_y_center = (big_bb.YMin + big_bb.YMax) / 2
+print(f"Usable stroke height: {usable_h:.1f} (y={usable_y_min:.1f}-{usable_y_max:.1f})")
+
+# Find the X center of the stroke material at the Y midpoint.
+# For curved letters (C, G, O) the arc cross-section at mid-height is narrower
+# and shifted relative to stroke_cx (the widest column center). Slicing there
+# gives a better centering target for the name.
+slice_h   = strip_h_val * 2
+# Probe only within the detected stroke column — prevents horizontal arms (E, F)
+# and spurs (G) from corrupting the bounding box and pulling arc_cx off-centre.
+slice_box = Part.makeBox(
+    stroke_width, slice_h, LETTER_DEPTH,
+    App.Vector(stroke_x_min, usable_y_center - slice_h / 2, 0)
+)
+try:
+    mid_slice = big_extrude_shape.common(slice_box)
+    mid_bb    = mid_slice.BoundBox
+    arc_cx    = (mid_bb.XMin + mid_bb.XMax) / 2
+    if arc_cx < stroke_x_min or arc_cx > stroke_x_max:
+        arc_cx = stroke_cx
+except Exception:
+    arc_cx = stroke_cx
+print(f"Arc center at Y midpoint: {arc_cx:.1f} (stroke_cx={stroke_cx:.1f})")
+
 # ─── NAME TEXT ────────────────────────────────────────────────────────────────
 MAX_NAME_HEIGHT = 7.0  # cap-height of name letters must never exceed this (units)
 
-name_size = max(4.0, min(stroke_width * 0.70, MAX_NAME_HEIGHT))
+name_size = max(3.0,min(stroke_width * 0.70, MAX_NAME_HEIGHT))
 
 name_2d = make_text_shape(name, font_path, name_size)
 
@@ -134,23 +192,59 @@ if first_char_h > MAX_NAME_HEIGHT:
     name_size = name_size * (MAX_NAME_HEIGHT / first_char_h)
     name_2d   = make_text_shape(name, font_path, name_size)
 
-# Clamp rotated text length to 85% of letter height
+# Clamp rotated text length to 85% of the actual filled stroke height (not full bbox)
 text_length = name_2d.BoundBox.XMax - name_2d.BoundBox.XMin
-max_name_h  = letter_h * 0.85
+max_name_h  = usable_h * 0.80
 
 if text_length > max_name_h:
-    name_size = max(4.0, name_size * (max_name_h / text_length))
+    name_size = max(3.0,name_size * (max_name_h / text_length))
     name_2d   = make_text_shape(name, font_path, name_size)
 
 print(f"Name size: {name_size:.2f} units")
 
 # ── Per-letter placement variables ──
-name_rotation = 90.0   # degrees CCW around Z
-name_2d_rotated = place_shape(name_2d, rotation_deg=name_rotation)
-name_bb = name_2d_rotated.BoundBox
+if initial == "A":
+    name_rotation = 285.0  # degrees CCW around Z
+    name_x_offset =   1.0  # X nudge applied after auto-center (positive = right)
+else:
+    name_rotation = 90.0   # degrees CCW around Z
+    name_x_offset =  0.0
+# Iterative fit: nudge the name rightward first (moves it deeper into the arc body
+# where the stroke is thicker), then scale down only once shifting is exhausted.
+SHIFT_STEP   = 1.0
+MAX_SHIFT    = min(stroke_width * 0.35, 6.0)
+name_x_shift = 0.0
+name_x = name_y = 0.0
 
-name_x = stroke_cx - (name_bb.XMin + name_bb.XMax) / 2
-name_y = (big_bb.YMin + big_bb.YMax) / 2 - (name_bb.YMin + name_bb.YMax) / 2
+for _attempt in range(12):
+    name_2d_rotated = place_shape(name_2d, rotation_deg=name_rotation)
+    name_bb  = name_2d_rotated.BoundBox
+    name_x   = arc_cx - (name_bb.XMin + name_bb.XMax) / 2 + name_x_offset + name_x_shift
+    name_y   = usable_y_center - (name_bb.YMin + name_bb.YMax) / 2
+
+    test_shape = place_shape(name_2d, rotation_deg=name_rotation, x=name_x, y=name_y)
+    test_solid = test_shape.extrude(App.Vector(0, 0, LETTER_DEPTH))
+    try:
+        total_vol  = test_solid.Volume
+        inside_vol = test_solid.common(big_extrude_shape).Volume
+        fit_ratio  = inside_vol / total_vol if total_vol > 0 else 1.0
+    except Exception:
+        fit_ratio  = 1.0
+
+    name_cx = (name_bb.XMin + name_bb.XMax) / 2 + name_x
+    print(f"Fit check {_attempt + 1}: {fit_ratio:.1%} inside (size={name_size:.2f}, cx={name_cx:.1f}, shift={name_x_shift:+.1f})")
+    if fit_ratio >= 0.99:
+        break
+
+    # Prefer shifting right over scaling — only scale once shift budget is spent
+    if name_x_shift + SHIFT_STEP <= MAX_SHIFT:
+        name_x_shift += SHIFT_STEP
+    else:
+        name_x_shift = 0.0          # reset shift for new font size
+        if name_size <= 3.0:
+            break
+        name_size = max(3.0, name_size * 0.88)
+        name_2d   = make_text_shape(name, font_path, name_size)
 
 if NAME_MODE == "engrave":
     name_2d_placed = place_shape(name_2d, rotation_deg=name_rotation, x=name_x, y=name_y, z=LETTER_DEPTH)
@@ -190,3 +284,4 @@ output_stl = f"/Users/davidlucas/Desktop/{name}_keychain.stl"
 Mesh.export([combined_feat], output_stl)
 print(f"Exported: {output_stl}")
 print("Done!")
+sys.exit(0)
