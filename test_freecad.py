@@ -4,6 +4,9 @@ Keychain generator — headless FreeCAD script.
 Usage: freecadcmd test_freecad.py [Name]
 Ref:   https://wiki.freecad.org/Power_users_hub
 """
+
+# ./run.sh Monique emboss
+
 import sys
 import FreeCAD as App
 import Part
@@ -206,6 +209,12 @@ print(f"Name size: {name_size:.2f} units")
 if initial == "A":
     name_rotation = 285.0  # degrees CCW around Z
     name_x_offset =   1.0  # X nudge applied after auto-center (positive = right)
+elif initial == "M":
+    name_rotation = 291.0  # degrees CCW around Z
+    name_x_offset =   13.0  # X nudge applied after auto-center (positive = right)
+elif initial == "N":
+    name_rotation = 303.0  # degrees CCW around Z
+    name_x_offset =   -17.0  # X nudge applied after auto-center (positive = right)
 else:
     name_rotation = 90.0   # degrees CCW around Z
     name_x_offset =  0.0
